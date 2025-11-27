@@ -1,32 +1,19 @@
 package com.aquq.smslisener
 
+import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Bundle
+import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -58,6 +45,9 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
+        // 🔥 Khi mở app → yêu cầu tắt tối ưu pin ngay lập tức
+        disableBatteryOptimizations()
+
         setContent {
             SMSLisenerTheme {
                 Surface(
@@ -72,12 +62,25 @@ class MainActivity : ComponentActivity() {
                         checkPermissions = {
                             permissions.all { permission ->
                                 ContextCompat.checkSelfPermission(this, permission) ==
-                                    PackageManager.PERMISSION_GRANTED
+                                        PackageManager.PERMISSION_GRANTED
                             }
                         }
                     )
                 }
             }
+        }
+    }
+
+
+    //BẮT TẮT CHẾ ĐỘ TỐI ƯU PIN
+    private fun disableBatteryOptimizations() {
+        val pm = getSystemService(POWER_SERVICE) as android.os.PowerManager
+        val packageName = packageName
+
+        if (!pm.isIgnoringBatteryOptimizations(packageName)) {
+            val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)
+            intent.data = Uri.parse("package:$packageName")
+            startActivity(intent)
         }
     }
 }
@@ -264,4 +267,3 @@ fun MainScreen(
         Spacer(modifier = Modifier.height(32.dp))
     }
 }
-

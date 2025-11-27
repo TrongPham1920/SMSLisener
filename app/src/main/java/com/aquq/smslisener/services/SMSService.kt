@@ -1,7 +1,8 @@
 package com.aquq.smslisener.services
 
 import android.Manifest
-import android.app.Service
+import android.annotation.SuppressLint
+import android.app.*
 import android.content.ContentUris
 import android.content.ContentValues
 import android.content.Context
@@ -15,124 +16,184 @@ import android.provider.MediaStore
 import android.telephony.SubscriptionManager
 import android.util.Log
 import androidx.core.app.ActivityCompat
+import androidx.core.app.NotificationCompat
+import com.aquq.smslisener.MainActivity
 import com.aquq.smslisener.api.ApiHelper
 import com.aquq.smslisener.utils.PreferenceManager
+import kotlinx.coroutines.*
 import java.io.IOException
 import java.text.SimpleDateFormat
 import java.util.*
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+
 
 class SmsService : Service() {
-    override fun onBind(intent: Intent): IBinder? {
-        return null
-    }
-    private fun getPhoneNumber(): String? {
-        val subscriptionManager = getSystemService(Context.TELEPHONY_SUBSCRIPTION_SERVICE) as SubscriptionManager
-        val subscriptionInfoList = if (ActivityCompat.checkSelfPermission(
-                this,
-                Manifest.permission.READ_PHONE_STATE
-            ) != PackageManager.PERMISSION_GRANTED
-        ) {
-            listOf()
-        } else {
-            subscriptionManager.activeSubscriptionInfoList
-        }
-        return if (subscriptionInfoList.isNotEmpty()) {
-            @Suppress("DEPRECATION")
-            subscriptionInfoList[0].number
-        } else {
-            null
-        }
+
+    override fun onCreate() {
+        super.onCreate()
+        createNotificationChannel()
     }
 
-    override fun onStartCommand(intent: Intent, flags: Int, startId: Int): Int {
-        val sender = intent.getStringExtra("sender") ?: ""
-        val message = intent.getStringExtra("message") ?: ""
-        Log.e(TAG, "Show listen sms $sender - $message")
+    @SuppressLint("ForegroundServiceType")
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+
+        val sender = intent?.getStringExtra("sender")
+        val message = intent?.getStringExtra("message")
+
+        // Gọi 1 lần startForeground với notification thực sự
+        startForeground(NOTIFICATION_ID, buildNotification(sender, message))
+
+        if (sender.isNullOrBlank() || message.isNullOrBlank()) {
+            return START_STICKY
+        }
 
         val receiver = getPhoneNumber() ?: "Unknown"
 
-        saveSmsToCsv(sender, receiver, message)
+        CoroutineScope(Dispatchers.IO).launch {
+            synchronized(FILE_LOCK) {
+                saveSmsToCsv(sender, receiver, message)
+            }
 
-        // Call API with configured domain and body format
-        val domain = PreferenceManager.getApiDomain(this)
-        val bodyFormat = PreferenceManager.getBodyFormat(this)
+            val domain = PreferenceManager.getApiDomain(this@SmsService)
+            val bodyFormat = PreferenceManager.getBodyFormat(this@SmsService)
 
-        if (domain.isNotEmpty() && bodyFormat.isNotEmpty()) {
-            ApiHelper.sendSmsData(domain, bodyFormat, sender, message, receiver)
-        } else {
-            Log.w(TAG, "API domain or body format not configured")
+            if (domain.isNotEmpty() && bodyFormat.isNotEmpty()) {
+                ApiHelper.sendSmsData(domain, bodyFormat, sender, message, receiver)
+            }
         }
 
-        return START_NOT_STICKY
+        return START_STICKY
     }
 
+
+    override fun onBind(intent: Intent?): IBinder? = null
+
+    /** ============================
+     *  Notification Foreground
+     *  ============================ */
+    private fun buildNotification(sender: String?, message: String?): Notification {
+
+        val intent = Intent(this, MainActivity::class.java)
+        val pendingIntent = PendingIntent.getActivity(
+            this, 0, intent,
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+
+        val contentText = if (sender != null && message != null)
+            "SMS từ $sender: $message"
+        else
+            "Đang chạy nền để lắng nghe SMS"
+
+        return NotificationCompat.Builder(this, CHANNEL_ID)
+            .setContentTitle("SMS Listener is running")
+            .setContentText(contentText)
+            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setContentIntent(pendingIntent)
+            .setOngoing(true)
+            .build()
+    }
+
+    private fun createNotificationChannel() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val serviceChannel = NotificationChannel(
+                CHANNEL_ID,
+                "SMS Listener Service",
+                NotificationManager.IMPORTANCE_LOW
+            )
+            val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            manager.createNotificationChannel(serviceChannel)
+        }
+    }
+
+
+    /** ============================
+     *  Lấy số điện thoại SIM
+     *  ============================ */
+    private fun getPhoneNumber(): String? {
+        val subscriptionManager =
+            getSystemService(Context.TELEPHONY_SUBSCRIPTION_SERVICE) as SubscriptionManager
+
+        if (ActivityCompat.checkSelfPermission(this, Manifest.permission.READ_PHONE_STATE)
+            != PackageManager.PERMISSION_GRANTED
+        ) return null
+
+        val infoList = subscriptionManager.activeSubscriptionInfoList ?: return null
+
+        return infoList.firstOrNull()?.number
+    }
+
+    /** ============================
+     *  Ghi CSV
+     *  ============================ */
     private fun saveSmsToCsv(sender: String?, receiver: String?, content: String?) {
         val resolver = applicationContext.contentResolver
-        val collection = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            MediaStore.Files.getContentUri(MediaStore.VOLUME_EXTERNAL)
-        } else {
-            MediaStore.Files.getContentUri("external")
-        }
-        val selection = "${MediaStore.MediaColumns.DISPLAY_NAME}=?"
-        val selectionArgs = arrayOf("sms_log.csv")
+
+        val collection =
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q)
+                MediaStore.Files.getContentUri(MediaStore.VOLUME_EXTERNAL)
+            else
+                MediaStore.Files.getContentUri("external")
+
+        val fileName = "sms_log.csv"
 
         val existingFileUri: Uri? = resolver.query(
             collection,
             arrayOf(MediaStore.MediaColumns._ID),
-            selection,
-            selectionArgs,
+            "${MediaStore.MediaColumns.DISPLAY_NAME}=?",
+            arrayOf(fileName),
             null
         )?.use { cursor ->
             if (cursor.moveToFirst()) {
                 val id = cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.MediaColumns._ID))
                 ContentUris.withAppendedId(collection, id)
-            } else {
-                null
-            }
+            } else null
         }
 
-        val uri = existingFileUri ?: resolver.insert(collection, ContentValues().apply {
-            put(MediaStore.MediaColumns.DISPLAY_NAME, "sms_log.csv")
-            put(MediaStore.MediaColumns.MIME_TYPE, "text/csv")
-            put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOCUMENTS)
-        })
+        val fileUri = existingFileUri ?: resolver.insert(
+            collection,
+            ContentValues().apply {
+                put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
+                put(MediaStore.MediaColumns.MIME_TYPE, "text/csv")
+                put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOCUMENTS)
+            }
+        )
 
-        uri?.let {
+        fileUri?.let {
             try {
-                resolver.openOutputStream(it, if (existingFileUri == null) "wt" else "wa")?.use { outputStream ->
-                    val writer = outputStream.bufferedWriter()
+                val mode = if (existingFileUri == null) "w" else "wa"
+                resolver.openOutputStream(it, mode)?.use { stream ->
+                    val writer = stream.bufferedWriter()
 
                     if (existingFileUri == null) {
-                        // Write header if the file is new
                         writer.write("ROWID,MessageDate,Sender,Receiver,Content\n")
                     }
 
-                    // Format the message date
-                    val sdf = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
-                    val messageDateFormatted = sdf.format(Date())
+                    val date = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date())
 
-                    // Increment the ROWID (This is a simple increment, replace with actual logic if needed)
-                    val rowId = (existingFileUri?.let { getExistingRowCount(it) } ?: 0) + 1
+                    val rowId = System.currentTimeMillis()
 
-                    writer.write("$rowId,$messageDateFormatted,$sender,$receiver,$content\n")
+                    writer.write("$rowId,$date,$sender,$receiver,$content\n")
                     writer.flush()
                 }
-            } catch (e: IOException) {
-                Log.e(TAG, "Error writing to CSV file", e)
+            } catch (e: Exception) {
+                Log.e(TAG, "Error writing CSV", e)
             }
-        } ?: run {
-            Log.e(TAG, "Failed to create or open file")
         }
     }
 
     private fun getExistingRowCount(uri: Uri): Int {
-        val resolver = applicationContext.contentResolver
-        return resolver.openInputStream(uri)?.use { inputStream ->
-            inputStream.bufferedReader().lineSequence().count { it.isNotBlank() } - 1 // Subtract 1 for header line
+        val resolver = contentResolver
+        return resolver.openInputStream(uri)?.use { input ->
+            input.bufferedReader().readLines().size - 1
         } ?: 0
     }
 
     companion object {
         private const val TAG = "SmsService"
+        private const val CHANNEL_ID = "SmsServiceChannel"
+        private const val NOTIFICATION_ID = 1
+        private val FILE_LOCK = Any()
     }
 }
