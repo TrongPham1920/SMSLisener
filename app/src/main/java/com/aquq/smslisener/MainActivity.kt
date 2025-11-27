@@ -1,5 +1,6 @@
 package com.aquq.smslisener
 
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Bundle
 import android.widget.Toast
@@ -23,6 +24,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -36,6 +38,7 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import com.aquq.smslisener.ui.theme.SMSLisenerTheme
 import com.aquq.smslisener.utils.PreferenceManager
+import com.aquq.smslisener.services.SmsService
 
 class MainActivity : ComponentActivity() {
 
@@ -91,6 +94,15 @@ fun MainScreen(
     var hasPermissions by remember { mutableStateOf(checkPermissions()) }
     var apiDomain by remember { mutableStateOf(PreferenceManager.getApiDomain(context)) }
     var bodyFormat by remember { mutableStateOf(PreferenceManager.getBodyFormat(context)) }
+
+    LaunchedEffect(hasPermissions) {
+        if (hasPermissions) {
+            ContextCompat.startForegroundService(
+                context,
+                Intent(context, SmsService::class.java)
+            )
+        }
+    }
 
     Column(
         modifier = Modifier

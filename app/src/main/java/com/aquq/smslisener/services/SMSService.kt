@@ -1,6 +1,10 @@
 package com.aquq.smslisener.services
 
 import android.Manifest
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
 import android.app.Service
 import android.content.ContentUris
 import android.content.ContentValues
@@ -15,13 +19,23 @@ import android.provider.MediaStore
 import android.telephony.SubscriptionManager
 import android.util.Log
 import androidx.core.app.ActivityCompat
+import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
 import com.aquq.smslisener.api.ApiHelper
 import com.aquq.smslisener.utils.PreferenceManager
+import com.aquq.smslisener.MainActivity
+import com.aquq.smslisener.R
 import java.io.IOException
 import java.text.SimpleDateFormat
 import java.util.*
 
 class SmsService : Service() {
+
+    override fun onCreate() {
+        super.onCreate()
+        createNotificationChannel()
+    }
+
     override fun onBind(intent: Intent): IBinder? {
         return null
     }
@@ -45,15 +59,19 @@ class SmsService : Service() {
     }
 
     override fun onStartCommand(intent: Intent, flags: Int, startId: Int): Int {
-        val sender = intent.getStringExtra("sender") ?: ""
-        val message = intent.getStringExtra("message") ?: ""
-        Log.e(TAG, "Show listen sms $sender - $message")
+        val sender = intent.getStringExtra("sender")
+        val message = intent.getStringExtra("message")
+
+        Log.d(TAG, "Foreground service ping. sender=$sender message=$message")
+        startForeground(NOTIFICATION_ID, buildNotification(sender, message))
+
+        if (sender.isNullOrBlank() || message.isNullOrBlank()) {
+            return START_STICKY
+        }
 
         val receiver = getPhoneNumber() ?: "Unknown"
-
         saveSmsToCsv(sender, receiver, message)
 
-        // Call API with configured domain and body format
         val domain = PreferenceManager.getApiDomain(this)
         val bodyFormat = PreferenceManager.getBodyFormat(this)
 
@@ -63,7 +81,49 @@ class SmsService : Service() {
             Log.w(TAG, "API domain or body format not configured")
         }
 
-        return START_NOT_STICKY
+        return START_STICKY
+    }
+
+    private fun buildNotification(sender: String?, message: String?): Notification {
+        val contentText = if (!sender.isNullOrBlank() && !message.isNullOrBlank()) {
+            "Tin mới từ $sender"
+        } else {
+            getString(R.string.notification_content_idle)
+        }
+
+        val intent = Intent(this, MainActivity::class.java)
+        val pendingIntent = PendingIntent.getActivity(
+            this,
+            0,
+            intent,
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+
+        val builder = NotificationCompat.Builder(this, CHANNEL_ID)
+            .setSmallIcon(android.R.drawable.stat_notify_chat)
+            .setContentTitle(getString(R.string.notification_title_listening))
+            .setContentText(contentText)
+            .setContentIntent(pendingIntent)
+            .setOngoing(true)
+            .setOnlyAlertOnce(true)
+        if (!message.isNullOrBlank()) {
+            builder.setStyle(NotificationCompat.BigTextStyle().bigText(message))
+        }
+        return builder.build()
+    }
+
+    private fun createNotificationChannel() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel(
+                CHANNEL_ID,
+                getString(R.string.notification_channel_name),
+                NotificationManager.IMPORTANCE_LOW
+            ).apply {
+                description = getString(R.string.notification_channel_description)
+                setShowBadge(false)
+            }
+            NotificationManagerCompat.from(this).createNotificationChannel(channel)
+        }
     }
 
     private fun saveSmsToCsv(sender: String?, receiver: String?, content: String?) {
@@ -134,5 +194,7 @@ class SmsService : Service() {
 
     companion object {
         private const val TAG = "SmsService"
+        private const val CHANNEL_ID = "sms_listener_channel"
+        private const val NOTIFICATION_ID = 1001
     }
 }

@@ -1,3 +1,7 @@
 <resources>
     <string name="app_name">SMSLisener</string>
+    <string name="notification_channel_name">SMS Listener</string>
+    <string name="notification_channel_description">Luôn lắng nghe SMS để đồng bộ API</string>
+    <string name="notification_title_listening">SMS Listener đang chạy</string>
+    <string name="notification_content_idle">Đang lắng nghe tin nhắn 24/24</string>
 </resources>

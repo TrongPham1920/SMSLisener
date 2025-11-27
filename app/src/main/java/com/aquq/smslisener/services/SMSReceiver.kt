@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.telephony.SmsMessage
 import android.util.Log
+import androidx.core.content.ContextCompat
 
 class SmsReceiver : BroadcastReceiver() {
 
@@ -17,7 +18,6 @@ class SmsReceiver : BroadcastReceiver() {
                     val smsMessage = SmsMessage.createFromPdu(pdu as ByteArray)
                     val sender = smsMessage.displayOriginatingAddress
                     val message = smsMessage.displayMessageBody
-                    val receiver = smsMessage
                     Log.d("SmsReceiver", "Sender: $sender, Message: $message")
 
                     // Gửi tin nhắn đến Service để lưu
@@ -27,7 +27,7 @@ class SmsReceiver : BroadcastReceiver() {
                     )
                     serviceIntent.putExtra("sender", sender)
                     serviceIntent.putExtra("message", message)
-                    context.startService(serviceIntent)
+                    ContextCompat.startForegroundService(context, serviceIntent)
                 }
             }
         }
