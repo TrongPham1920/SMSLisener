@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <!-- Cho phép cả HTTP và HTTPS -->
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <!-- Trust các certificate mặc định của hệ thống -->
+            <certificates src="system" />
+            <!-- Trust các certificate do user cài đặt -->
+            <certificates src="user" />
+        </trust-anchors>
+    </base-config>
+
+    <!-- Cấu hình cho domain cụ thể nếu cần -->
+    <!--
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="true">example.com</domain>
+    </domain-config>
+    -->
+</network-security-config>
+
