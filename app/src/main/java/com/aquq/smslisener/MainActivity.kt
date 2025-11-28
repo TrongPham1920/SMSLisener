@@ -3,8 +3,10 @@ package com.aquq.smslisener
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
+import android.util.Log
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -23,6 +25,7 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import com.aquq.smslisener.ui.theme.SMSLisenerTheme
 import com.aquq.smslisener.utils.PreferenceManager
+import com.aquq.smslisener.services.SmsService
 
 class MainActivity : ComponentActivity() {
 
@@ -42,11 +45,32 @@ class MainActivity : ComponentActivity() {
         onPermissionResult?.invoke(allGranted)
     }
 
+    // Request quyền POST_NOTIFICATIONS cho Android 13+
+    private val requestNotificationPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        if (isGranted) {
+            Log.d("MainActivity", "POST_NOTIFICATIONS đã được cấp")
+        } else {
+            Log.w("MainActivity", "POST_NOTIFICATIONS bị từ chối - notification sẽ không hiển thị")
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // 🔥 Khi mở app → yêu cầu tắt tối ưu pin ngay lập tức
+        //Khi mở app → yêu cầu tắt tối ưu pin ngay lập tức
         disableBatteryOptimizations()
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (ContextCompat.checkSelfPermission(
+                    this,
+                    android.Manifest.permission.POST_NOTIFICATIONS
+                ) != PackageManager.PERMISSION_GRANTED
+            ) {
+                requestNotificationPermissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+            }
+        }
 
         setContent {
             SMSLisenerTheme {
@@ -94,6 +118,20 @@ fun MainScreen(
     var hasPermissions by remember { mutableStateOf(checkPermissions()) }
     var apiDomain by remember { mutableStateOf(PreferenceManager.getApiDomain(context)) }
     var bodyFormat by remember { mutableStateOf(PreferenceManager.getBodyFormat(context)) }
+
+    //Auto start foreground service
+    LaunchedEffect(hasPermissions) {
+        if (hasPermissions) {
+            Log.d("MainActivity", "Đã có quyền, đang start foreground service...")
+            val serviceIntent = Intent(context, SmsService::class.java)
+            try {
+                ContextCompat.startForegroundService(context, serviceIntent)
+                Log.d("MainActivity", "Foreground service đã được start")
+            } catch (e: Exception) {
+                Log.e("MainActivity", "Lỗi khi start foreground service", e)
+            }
+        }
+    }
 
     Column(
         modifier = Modifier
